@@ -1,0 +1,621 @@
+---
+title: "Building a Conflict Recurrence Data Set"
+author: "Brian Lookabaugh"
+output: html_document
+---
+
+```{r echo=FALSE, message=FALSE}
+library(Statamarkdown)
+```
+
+Conflict recurrence, the political phenomenon where countries that have recently exited civil war relapse into conflict, is an important part of the civil war literature. Indeed, scholars such as [Collier et al. (2003)](https://openknowledge.worldbank.org/handle/10986/13938/) have stressed the dangers of conflict recurrence by detailing the conflict trap, in which countries are stuck in a seemingly never-ending cycle of civil war to peace, civil war to peace, and so on. Despite the importance of this topic, it can be surprisingly challenging to access a data set on conflict recurrence for certain types of analysis. Indeed, if one is simply interested in the covariates (aggregated at the national level) of conflict recurrence, the process of building (and you do *have* to build) a conflict recurrence data set is very counter-intuitive. This document seeks to walk through and share code in Stata in the hopes that it will be helpful to any who were running into the same issue that I once was.
+
+## Building the Base Conflict Recurrence Data set
+
+First, we begin by loading the UCDP data so that we can isolate instances of civil war.
+
+```{stata, results="hide"}
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-acd-211.dta"
+```
+
+Next, we need to de-string some variables, given that many variables in the UCDP Armed Conflict Data set are originally coded as strings.
+
+```{stata, results="hide"}
+destring year, replace
+destring type_of_conflict, replace
+```
+
+We are only interested in instances of civil war (coded as "3" for UCDP), so we need to only keep cases that are civil wars.
+
+```{stata, results="hide"}
+keep if type_of_conflict == 3
+```
+
+Now, we will create a variable called "civil_war". Every observation in this data set will be coded as "1". We will end up using this variable later to collapse the data since we are seeking country-year data and UCDP's basic Armed Conflict data has numerous country-year observations for the same country-year observations. Essentially, we want to ensure that each country-year observation is distinct.
+
+```{stata, results="hide"}
+gen civil_war = 1
+```
+
+Next, we need to rename UCDP's country identifier variable to "ccode" (shortened form of Correlates of War code) so that we can merge this country identifier easily with other sources that use cow-codes as is the general convention in political science research. Note that this country identifier is almost identical to cow-codes.
+
+```{stata, results="hide"}
+rename gwno_a ccode
+destring ccode, replace
+```
+
+Now, we are going to collapse the data so that each country has one observation per year.
+
+```{stata, results="hide"}
+sort ccode year
+collapse (max) civil_war, by(ccode year)
+```
+
+What we have done now is constructed a data set for civil war countries where each country has one observation per year. However, we need to do more than this to study conflict recurrence, given that we also need to have information on countries when no civil war is present. To include peace years, we are going to merge this data with the Correlates of War's State System Membership, which records all country-year observations since 1816.
+
+```{stata, results="hide"}
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\COWCountries.dta"
+```
+
+To study conflict recurrence, we need a data set that is restricted by numerous conditions. First, we need to know which countries are *post-conflict* given that conflict recurrence only exists if a prior civil war took place. To do so, we will create a prior civil war variable (which will simply be equal to the civil war variable at first) and then use Stata's "carryforward" command to fill all observations as "1" if the row above also has a value of "1".
+
+```{stata, results="hide"}
+gen prior_civil_war = civil_war
+sort ccode year
+by ccode: carryforward prior_civil_war, replace
+```
+
+Now that we have the most crucial conditions accounted for, let's implement some practical, theory-driven data cleaning. First, we want to replace values where civil war is equal to a null value to simply "0". Second, if only a one-year gap of "peace" exists between two country-year observations where conflict was ongoing, we are going to re-code that peace-year as a civil war-year given that this likely reflects a lull in fighting rather than a termination of civil war itself.
+
+```{stata, results="hide"}
+replace civil_war = 0 if civil_war == .
+replace civil_war = 1 if civil_war[_n-1] == 1 & civil_war[_n+1] == 1
+```
+
+Due to UCDP's battle-death threshold, the data set is known to code violent coups as civil wars. Prior research has demonstrated that coups and civil wars are unique events. We are going to need to re-code these events as non-civil war-years. We are going to use [Thyne's (2017)](https://jstor.org/stable/26271463/) list of coups to do so.
+
+```{stata, results="hide"}
+replace civil_war = 0 if ccode == 145 & year == 1952
+replace civil_war = 0 if ccode == 150 & year == 1954
+replace civil_war = 0 if ccode == 150 & year == 1989
+replace civil_war = 0 if ccode == 90 & year == 1954
+replace civil_war = 0 if ccode == 800 & year == 1951
+replace civil_war = 0 if ccode == 530 & year == 1960
+replace civil_war = 0 if ccode == 481 & year == 1964
+replace civil_war = 0 if ccode == 516 & year == 1965
+replace civil_war = 0 if ccode == 452 & year == 1966
+replace civil_war = 0 if ccode == 452 & year == 1981
+replace civil_war = 0 if ccode == 452 & year == 1983
+replace civil_war = 0 if ccode == 652 & year == 1966
+replace civil_war = 0 if ccode == 625 & year == 1971
+replace civil_war = 0 if ccode == 625 & year == 1976
+replace civil_war = 0 if ccode == 600 & year == 1971
+replace civil_war = 0 if ccode == 500 & year == 1974
+replace civil_war = 0 if ccode == 155 & year == 1973
+replace civil_war = 0 if ccode == 450 & year == 1980
+replace civil_war = 0 if ccode == 420 & year == 1981
+replace civil_war = 0 if ccode == 501 & year == 1982
+replace civil_war = 0 if ccode == 471 & year == 1984
+replace civil_war = 0 if ccode == 680 & year == 1986
+replace civil_war = 0 if ccode == 439 & year == 1987
+replace civil_war = 0 if ccode == 581 & year == 1989
+replace civil_war = 0 if ccode == 95 & year == 1989
+replace civil_war = 0 if ccode == 41 & year == 1989
+replace civil_war = 0 if ccode == 41 & year == 1991
+replace civil_war = 0 if ccode == 373 & year == 1995
+```
+
+Now, we need to generate the civil war recurrence variable itself. We are simply going to call this variable "failure" both because it represents an instance of peace failure but also because this terminology fits well with the terminology of survival analysis, which should be used in the study of conflict recurrence.
+
+```{stata, results="hide"}
+by ccode: gen failure = 1 if civil_war[_n-1] == 0 & civil_war[_n] == 1
+replace failure = 0 if failure == .
+```
+
+This next step is just a practical step to take more than anything else. We are going to re-code observations where a civil war recurrence event took place as *not* being civil wars. Note that this is just for the sake of convenience so that, when we drop the civil war variable, we are also not dropping the failure variable as well.
+
+```{stata, results="hide"}
+replace civil_war = 0 if failure == 1
+```
+
+Now, we are going to start dropping data that is not relevant to us, including observations where a civil war is ongoing (again, barring the failure event), observations that are not post-conflict countries, and observations that did not merge into the data set (7 observation in total).
+
+```{stata, results="hide"}
+drop if prior_civil_war == .
+drop if civil_war == 1
+drop if _merge == 1
+```
+
+Before we are finally done with the base data set, we will also go ahead and create both a peace spell identifier (a unique code for a period of peace in between civil war) along with a count of prior peace spells.
+
+```{stata, results="hide"}
+sort ccode year
+by ccode: gen new_case = 1 if failure == 0 & failure[_n-1] == 1
+
+sort ccode year
+by ccode: gen sum_cases = sum(new_case)
+
+gen spell_identifier = (sum_cases*1000) + ccode
+gen spell_count = sum_cases
+
+drop new_case
+drop sum_cases
+```
+
+Almost there! So far, within this data set, the *first* instance of peace failure is still included. That is, the final year of conflict prior to a country being considered a post-conflict country. However, we do not need this specific information since we are only interested in post-conflict countries. So we are going to drop the first observation of each country in the data set if that first year includes civil war.
+
+```{stata, results="hide"}
+sort ccode year
+by ccode: drop if _n == 1
+```
+
+Lastly, we are just going to do some clean-up and drop unnecessary variables. After this, we will have a conflict recurrence data set! In the next section, we will go over the merging process to incorporate other variables, both commonplace and unique, that are associated with the study of conflict recurrence.
+
+```{stata, results="hide"}
+drop civil_war version _merge prior_civil_war
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\1-CRData.dta", 
+///
+replace
+```
+
+## Merging Covariates Into the Data set
+
+Much of the data that will be merged into this data set will follow the same procedure as the construction of the base conflict recurrence data set. However, instead of collapsing data by civil war, the data will be collapsed by the variable of interest. Because of this, I will not annotate code on the merging of covariates. In some cases, the procedure is slightly different given alternative data sets and their structure, but the outcome is the same. In each case, the data is transformed so that it can be merged into a country-year format.
+
+Merge UCDP Prior Battle-Deaths Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-acd-211.dta"
+
+destring year, replace
+destring type_of_conflict, replace
+
+keep if type_of_conflict == 3
+
+rename gwno_a ccode
+
+destring ccode, replace
+destring cumulative_intensity, replace
+
+sort ccode year
+collapse (max) cumulative_intensity, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data  Files\1-CRData.dta"
+
+sort ccode year
+by ccode: carryforward cumulative_intensity, replace
+
+drop if _merge == 1 
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\2-CRData.dta", 
+///
+replace
+```
+
+Merge UCDP Prior War Duration Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-acd-211.dta" 
+
+destring year, replace
+destring type_of_conflict, replace
+
+keep if type_of_conflict == 3
+
+rename gwno_a ccode
+
+destring ccode, replace
+
+sort ccode year
+by ccode: gen war_duration = _n
+collapse (max) war_duration, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\2-CRData.dta"
+
+sort ccode year
+by ccode: carryforward war_duration, replace
+by ccode: replace war_duration = war_duration[_n-1] if failure == 1
+
+drop if _merge == 1 
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\3-CRData.dta", 
+///
+replace
+```
+
+Merge UCDP Prior War Outcome Data
+
+```{stata, results="hide"}
+clear 
+
+use ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-conflict-termination.dta"
+
+destring year, replace
+destring type_of_conflict, replace
+
+keep if type_of_conflict == 3
+
+rename gwno_loc ccode
+
+destring ccode, replace
+
+gen peace_agg = 1 if outcome == 1
+replace peace_agg = 0 if peace_agg == .
+
+sort ccode year
+collapse (max) peace_agg, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\3-CRData.dta"
+
+sort ccode year
+by ccode: carryforward peace_agg, replace
+
+drop if _merge == 1
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\4-CRData.dta", 
+///
+replace
+```
+
+Merge UCDP Prior Conflict Type Data
+
+```{stata, results="hide"}
+clear
+
+use ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-conflict-termination.dta"
+
+destring year, replace
+destring type_of_conflict, replace
+
+keep if type_of_conflict == 3
+
+rename gwno_loc ccode
+
+destring ccode, replace
+
+gen territory = 1 if incompatibility != 2
+replace territory = 0 if territory == .
+
+sort ccode year
+collapse (max) territory, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\4-CRData.dta"
+
+sort ccode year
+by ccode: carryforward territory, replace
+
+drop if _merge == 1
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\5-CRData.dta", 
+///
+replace
+```
+
+Merge Peacekeeping Operations Data
+
+```{stata, results="hide"}
+clear
+
+use ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\MullenbachPKOData.dta"
+
+keep if TPTYPE == 1
+
+rename CCODE1 ccode
+
+gen case=_n
+
+gen duration = ENDYR - STARTYR + 1
+expand duration
+
+sort case
+by case: gen time = _n
+gen year = STARTYR + time - 1
+sort ccode year
+gen PKO = 1 
+collapse (max) PKO, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\5-CRData.dta"
+
+sort ccode year
+by ccode: carryforward PKO, replace
+
+drop if _merge == 1
+drop _merge
+
+replace PKO = 0 if PKO == .
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\6-CRData.dta", 
+///
+replace
+```
+
+Merge UCDP Number of Prior Warring Parties Data
+
+```{stata, results="hide"}
+clear
+
+use ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\ucdp-prio-conflict-termination.dta"
+
+destring year, replace
+destring type_of_conflict, replace
+
+keep if type_of_conflict == 3
+
+rename gwno_loc ccode
+
+destring ccode, replace
+
+gen civil_war = 1
+
+replace civil_war = 0 if civil_war == .
+replace civil_war = 1 if civil_war[_n-1] == 1 & civil_war[_n+1] == 1
+
+replace civil_war = 0 if ccode == 145 & year == 1952
+replace civil_war = 0 if ccode == 150 & year == 1954
+replace civil_war = 0 if ccode == 150 & year == 1989
+replace civil_war = 0 if ccode == 90 & year == 1954
+replace civil_war = 0 if ccode == 800 & year == 1951
+replace civil_war = 0 if ccode == 530 & year == 1960
+replace civil_war = 0 if ccode == 481 & year == 1964
+replace civil_war = 0 if ccode == 516 & year == 1965
+replace civil_war = 0 if ccode == 452 & year == 1966
+replace civil_war = 0 if ccode == 452 & year == 1981
+replace civil_war = 0 if ccode == 452 & year == 1983
+replace civil_war = 0 if ccode == 652 & year == 1966
+replace civil_war = 0 if ccode == 625 & year == 1971
+replace civil_war = 0 if ccode == 625 & year == 1976
+replace civil_war = 0 if ccode == 600 & year == 1971
+replace civil_war = 0 if ccode == 500 & year == 1974
+replace civil_war = 0 if ccode == 155 & year == 1973
+replace civil_war = 0 if ccode == 450 & year == 1980
+replace civil_war = 0 if ccode == 420 & year == 1981
+replace civil_war = 0 if ccode == 501 & year == 1982
+replace civil_war = 0 if ccode == 471 & year == 1984
+replace civil_war = 0 if ccode == 680 & year == 1986
+replace civil_war = 0 if ccode == 439 & year == 1987
+replace civil_war = 0 if ccode == 581 & year == 1989
+replace civil_war = 0 if ccode == 95 & year == 1989
+replace civil_war = 0 if ccode == 41 & year == 1989
+replace civil_war = 0 if ccode == 41 & year == 1991
+replace civil_war = 0 if ccode == 373 & year == 1995
+
+gen parties = 1
+collapse (sum) parties, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Data\COWCountries.dta"
+
+drop if _merge == 1
+
+sort ccode year
+
+gen last_con_year = 1 if parties[_n] != . & parties[_n+1] == .
+replace last_con_year = 0 if last_con_year == .
+
+gen con_complex = parties if last_con_year == 1
+
+sort ccode year
+by ccode: carryforward con_complex, replace
+
+drop _merge
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\6-CRData.dta"
+
+drop if _merge != 3
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\7-CRData.dta", 
+///
+replace
+```
+
+Note that the V-Dem civil society and SCAD data are particular to my specific research. These are not standard covariates of conflict recurrence and are not required for research in this area unless you are interested in measures of civil society or counts of low-level deaths.
+
+Merge V-Dem Civil Society Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\VDEM-Paper1-Data.dta"
+
+sort ccode year
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\7-CRData.dta"
+
+drop if _merge != 3
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\8-CRData.dta", 
+///
+replace
+```
+
+Merge SCAD Africa Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\SCADAfricaData.dta"
+
+drop if ndeath < 0
+drop if escalation == 10
+
+rename styr year
+
+sort ccode year
+collapse (sum) ndeath, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\8-CRData.dta"
+
+drop if _merge == 1
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\9-CRData.dta", 
+///
+replace
+```
+
+Merge SCAD Latin America Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\SCADLatAmData.dta"
+
+drop if ndeath < 0
+drop if escalation == 10
+
+rename styr year
+
+sort ccode year
+collapse (sum) ndeath, by(ccode year)
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\9-CRData.dta"
+
+drop if _merge == 1
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\10-CRData.dta", 
+///
+replace
+```
+
+Merge Ethnic Fractionalization Data
+
+```{stata, results="hide"}
+clear
+
+use "C:\Users\brian\Desktop\Dissertation & Projects\Data\HIEF-Data.dta"
+
+drop country
+
+merge m:m ccode year using ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\10-CRData.dta"
+
+drop if _merge == 1
+drop _merge
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\11-CRData.dta", 
+///
+replace
+```
+
+In this next section, we are generating time and lagged variables. Again, note that the lagged variables related to civil society are not standard practice for conflict recurrence analysis so, unless you have some theoretical reasoning to include such data, it is not necessary to include the lagged civil society variables. However, it is recommended to generate the time variable, which is simply a count of time elapsed within specific peace spells.
+
+Generate Time and Lagged Variables
+
+```{stata, results="hide"}
+rename v2csprtcpt_ord CSO_prtcpt
+
+sort ccode year
+by ccode: gen CSO_lag1 = CSO_prtcpt[_n-1]
+by ccode: gen CSO_lag3 = CSO_prtcpt[_n-3]
+by ccode: gen CSO_lag5 = CSO_prtcpt[_n-5]
+
+sort spell_identifier year
+by spell_identifier: gen time = [_n]
+```
+
+## Final Data Cleaning and Organization
+
+Using the V-Dem data, we are going to use V-Dem's democracy measure (a score that ranges from 0 to 1) to create a dummy variable for democracy.
+
+```{stata, results="hide"}
+gen democracy = 1 if v2x_regime > 1
+replace democracy = 0 if democracy == .
+drop v2x_regime
+```
+
+Now, we are going to drop variables that are not needed, but have made it into the final data set.
+
+```{stata, results="hide"}
+drop parties
+drop last_con_year
+drop version
+```
+
+Next, we will rename select variables and given them a new name that is more intuitive to understand.
+
+```{stata, results="hide"}
+rename efindex ethnic_frac
+rename ndeath low_lvl_deaths
+rename CSO_prtcpt CSO
+```
+
+The ethnic fractionalization variable ranges from 0 to 1. This scale will lead to difficult-to-interpret coefficients if this variable is included in a regression. Because of this, we are going to create a new score and multiply it by 100 so that observations will range from 0 to 100 instead.
+
+```{stata, results="hide"}
+gen ethnic_frac_new = ethnic_frac * 100
+```
+
+Now, we are going to log-transform the GDP per capita variable as GDP per capita has a distribution that is heavily right-skewed. Note that we are adding "+1" to the log-transformed value of GDP per capita to account for observations where a value might be less than 1. Since one cannot take the log of a value less than 1, this step is necessary to avoid nonsensical values for Log(GDP per capita).
+
+```{stata, results="hide"}
+gen lGDPpc = ln(e_gdppc + 1)
+```
+
+To ensure that we do not have duplicates in our data set, we are going to list duplicates and then drop them.
+
+```{stata, results="hide"}
+duplicates list
+duplicates drop
+```
+
+Lastly, we are going to label our data so that we understand what each variable is.
+
+```{stata, results="hide"}
+label variable failure "Civil War Recurrence"
+label variable low_lvl_deaths "Low-Level Deaths"
+label variable CSO "Civil Society Participation"
+label variable ethnic_frac "Ethnic Diversity"
+label variable democracy "Democracy"
+label variable cumulative_intensity "Prior Conflict Intensity"
+label variable PKO "Peacekeeping Operation"
+label variable war_duration "Prior War Duration"
+label variable territory "Prior Territorial Conflict"
+label variable peace_agg "Prior Peace Agreement"
+label variable spell_count "Prior Peace Spells"
+label variable con_complex "Prior Conflict Complexity"
+label variable lGDPpc "Log(GDP per Capita)"
+
+save ///
+"C:\Users\brian\Desktop\Dissertation & Projects\Paper 1\Paper 1 Data Files\12-CRData.dta", 
+///
+replace
+```
+
+Congratulations! You now hold a country-year aggregated conflict recurrence data set that includes common covariates associated with conflict recurrence and (optionally) a couple of extra variables related to my research.
